@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>기체의 압력·부피·온도 시뮬레이션</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f5f7f9;font-family:Arial,"Malgun Gothic",sans-serif;color:#222;text-align:center}
+h1{margin:20px 0 5px;font-size:25px}.subtitle{color:#666;margin-bottom:15px}
+.simulation{width:900px;max-width:95%;margin:auto}
+canvas{width:100%;border:2px solid #555;border-radius:12px;background:#eef6ff;display:block}
+.meters{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.meter{background:white;border:1px solid #ccc;border-radius:10px;padding:12px}
+.meter-title{font-size:14px;color:#666}.meter-value{font-size:23px;font-weight:bold;margin-top:5px}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.control-box{background:white;border:1px solid #ccc;border-radius:10px;padding:15px}
+.control-label{display:flex;justify-content:space-between;font-weight:bold;margin-bottom:8px}
+input[type=range]{width:100%}
+.buttons{margin-top:12px;display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
+button{border:none;border-radius:8px;padding:11px 22px;font-size:16px;font-weight:bold;cursor:pointer}
+#startButton{background:#4caf50;color:white}#stopButton{background:#e53935;color:white}
+#heaterButton{background:#ff7043;color:white}#resetButton{background:#607d8b;color:white}
+#status{margin-top:12px;padding:12px;background:white;border-radius:10px;font-weight:bold}
+.explanation{margin-top:12px;background:white;border-radius:10px;padding:15px;text-align:left;line-height:1.7;font-size:14px}
+@media(max-width:600px){.controls{grid-template-columns:1fr}.meter-value{font-size:17px}}
+</style>
+</head>
+<body>
+<h1>🧪 기체의 압력·부피·온도 시뮬레이션</h1>
+<div class="subtitle">피스톤을 움직이거나 가열하여 P, V, T의 관계를 직접 관찰해 보세요.</div>
+<div class="simulation">
+<canvas id="gasCanvas" width="900" height="500"></canvas>
+
+<div class="meters">
+<div class="meter"><div class="meter-title">압력 P</div><div class="meter-value" id="pressureValue">1.000 atm</div></div>
+<div class="meter"><div class="meter-title">부피 V</div><div class="meter-value" id="volumeValue">10.00 L</div></div>
+<div class="meter"><div class="meter-title">온도 T</div><div class="meter-value" id="temperatureValue">300.0 K</div></div>
+</div>
+
+<div class="controls">
+<div class="control-box">
+<div class="control-label"><span>피스톤 위치</span><span id="pistonText">50%</span></div>
+<input id="pistonSlider" type="range" min="25" max="75" value="50" step="1">
+</div>
+<div class="control-box">
+<div class="control-label"><span>가열기 목표 온도</span><span id="heaterText">300 K</span></div>
+<input id="heaterSlider" type="range" min="250" max="600" value="300" step="1">
+</div>
+</div>
+
+<div class="buttons">
+<button id="startButton">START</button>
+<button id="stopButton">STOP</button>
+<button id="heaterButton">🔥 가열기 켜기</button>
+<button id="resetButton">초기화</button>
+</div>
+
+<div id="status">START를 눌러 기체 입자 운동을 시작하세요.</div>
+
+<div class="explanation">
+<b>실험 원리</b><br>
+이상 기체 상태 방정식 <b>PV = nRT</b>를 이용합니다. 기체의 몰수 n은 일정하게 유지됩니다.<br>
+피스톤을 움직여 부피를 변화시키면 압력과 부피의 관계를 관찰할 수 있습니다.<br>
+온도를 일정하게 유지하면 <b>보일 법칙 P × V = 일정</b>을 확인할 수 있습니다.<br>
+피스톤의 위치를 일정하게 유지하고 가열하면 온도와 압력의 관계를 관찰할 수 있습니다.<br>
+기체 입자의 평균 운동 속도는 <b>√T</b>에 비례하도록 설정했습니다.
+</div>
+</div>
+
+<script>
+const canvas=document.getElementById("gasCanvas"),ctx=canvas.getContext("2d");
+const pistonSlider=document.getElementById("pistonSlider");
+const heaterSlider=document.getElementById("heaterSlider");
+const pistonText=document.getElementById("pistonText");
+const heaterText=document.getElementById("heaterText");
+const pressureValue=document.getElementById("pressureValue");
+const volumeValue=document.getElementById("volumeValue");
+const temperatureValue=document.getElementById("temperatureValue");
+const statusText=document.getElementById("status");
+const startButton=document.getElementById("startButton");
+const stopButton=document.getElementById("stopButton");
+const heaterButton=document.getElementById("heaterButton");
+const resetButton=document.getElementById("resetButton");
+
+const INITIAL_TEMPERATURE=300,INITIAL_VOLUME=10,INITIAL_PRESSURE=1,PARTICLE_COUNT=45;
+const cylinderLeft=180,cylinderRight=720,groundY=410,cylinderTop=70;
+let pistonPosition=50,temperature=300,heaterOn=false,running=false,animationID;
+let particles=[];
+
+function getVolume(){return INITIAL_VOLUME*(pistonPosition/50)}
+function getPressure(){return INITIAL_PRESSURE*(temperature/INITIAL_TEMPERATURE)*(INITIAL_VOLUME/getVolume())}
+function getPistonY(){
+ const minY=130,maxY=330;
+ return maxY-((pistonPosition-25)/50)*(maxY-minY);
+}
+function createParticles(){
+ particles=[];
+ const pistonY=getPistonY();
+ for(let i=0;i<PARTICLE_COUNT;i++){
+  const a=Math.random()*Math.PI*2;
+  particles.push({
+   x:cylinderLeft+20+Math.random()*(cylinderRight-cylinderLeft-40),
+   y:pistonY+25+Math.random()*(groundY-pistonY-45),
+   vx:Math.cos(a),vy:Math.sin(a)
+  });
+ }
+}
+function updateParticleBounds(){
+ const pistonY=getPistonY();
+ for(const p of particles){
+  if(p.x<cylinderLeft+12){p.x=cylinderLeft+12;p.vx=Math.abs(p.vx)}
+  if(p.x>cylinderRight-12){p.x=cylinderRight-12;p.vx=-Math.abs(p.vx)}
+  if(p.y<pistonY+15){p.y=pistonY+15;p.vy=Math.abs(p.vy)}
+  if(p.y>groundY-15){p.y=groundY-15;p.vy=-Math.abs(p.vy)}
+}
+}
+pistonSlider.addEventListener("input",function(){
+ pistonPosition=Number(this.value);pistonText.textContent=pistonPosition+"%";updateParticleBounds();draw();
+});
+heaterSlider.addEventListener("input",function(){heaterText.textContent=this.value+" K"});
+startButton.addEventListener("click",function(){
+ if(running)return;running=true;statusText.textContent="기체 입자가 운동하고 있습니다.";animationID=requestAnimationFrame(update);
+});
+stopButton.addEventListener("click",function(){
+ running=false;cancelAnimationFrame(animationID);statusText.textContent="시뮬레이션이 정지되었습니다.";
+});
+heaterButton.addEventListener("click",function(){
+ heaterOn=!heaterOn;
+ heaterButton.textContent=heaterOn?"🔥 가열기 끄기":"🔥 가열기 켜기";
+ statusText.textContent=heaterOn?"가열기가 켜졌습니다. 기체 온도가 상승합니다.":"가열기가 꺼졌습니다.";
+});
+resetButton.addEventListener("click",function(){
+ running=false;cancelAnimationFrame(animationID);
+ pistonPosition=50;temperature=300;heaterOn=false;
+ pistonSlider.value=50;heaterSlider.value=300;pistonText.textContent="50%";heaterText.textContent="300 K";
+ heaterButton.textContent="🔥 가열기 켜기";statusText.textContent="초기 상태로 돌아갔습니다.";
+ createParticles();draw();
+});
+function update(){
+ if(!running)return;
+ const target=Number(heaterSlider.value);
+ if(heaterOn)temperature+=(target-temperature)*0.02;
+ else temperature+=(300-temperature)*0.005;
+ const speed=Math.sqrt(temperature/INITIAL_TEMPERATURE);
+ const pistonY=getPistonY();
+ for(const p of particles){
+  p.x+=p.vx*speed*1.5;p.y+=p.vy*speed*1.5;
+  if(p.x<cylinderLeft+12){p.x=cylinderLeft+12;p.vx=Math.abs(p.vx)}
+  if(p.x>cylinderRight-12){p.x=cylinderRight-12;p.vx=-Math.abs(p.vx)}
+  if(p.y<pistonY+15){p.y=pistonY+15;p.vy=Math.abs(p.vy)}
+  if(p.y>groundY-15){p.y=groundY-15;p.vy=-Math.abs(p.vy)}
+ }
+ draw();animationID=requestAnimationFrame(update);
+}
+function draw(){
+ ctx.clearRect(0,0,canvas.width,canvas.height);
+ const bg=ctx.createLinearGradient(0,0,0,canvas.height);
+ bg.addColorStop(0,"#e3f2fd");bg.addColorStop(1,"#fff");
+ ctx.fillStyle=bg;ctx.fillRect(0,0,canvas.width,canvas.height);
+
+ const pistonY=getPistonY();
+ ctx.fillStyle="rgba(190,220,235,.45)";
+ ctx.fillRect(cylinderLeft,pistonY,cylinderRight-cylinderLeft,groundY-pistonY);
+
+ ctx.strokeStyle="#455a64";ctx.lineWidth=5;
+ ctx.strokeRect(cylinderLeft,cylinderTop,cylinderRight-cylinderLeft,groundY-cylinderTop);
+
+ ctx.fillStyle="#607d8b";
+ ctx.fillRect(cylinderLeft-10,pistonY-10,cylinderRight-cylinderLeft+20,20);
+
+ ctx.fillStyle="#455a64";
+ ctx.fillRect((cylinderLeft+cylinderRight)/2-8,pistonY-55,16,45);
+
+ for(const p of particles){
+  ctx.beginPath();ctx.arc(p.x,p.y,5,0,Math.PI*2);ctx.fillStyle="#1976d2";ctx.fill();
+ }
+
+ ctx.textAlign="center";
+ ctx.font="32px Arial";
+ if(heaterOn)ctx.fillText("🔥🔥🔥",(cylinderLeft+cylinderRight)/2,groundY+45);
+ ctx.font="14px Arial";ctx.fillStyle="#455a64";
+ ctx.fillText("가열기",(cylinderLeft+cylinderRight)/2,groundY+68);
+
+ ctx.textAlign="left";ctx.fillStyle="#263238";ctx.font="bold 15px Arial";
+ ctx.fillText("닫힌 실린더",cylinderLeft,cylinderTop-15);
+ ctx.fillText("피스톤",cylinderRight+20,pistonY+5);
+ ctx.fillText("기체 입자",cylinderLeft+15,pistonY+35);
+
+ const pressure=getPressure(),volume=getVolume();
+ pressureValue.textContent=pressure.toFixed(3)+" atm";
+ volumeValue.textContent=volume.toFixed(2)+" L";
+ temperatureValue.textContent=temperature.toFixed(1)+" K";
+
+ ctx.fillStyle="rgba(255,255,255,.9)";ctx.fillRect(20,20,210,105);
+ ctx.fillStyle="#263238";ctx.font="14px Arial";
+ ctx.fillText("압력 P = "+pressure.toFixed(3)+" atm",35,48);
+ ctx.fillText("부피 V = "+volume.toFixed(2)+" L",35,75);
+ ctx.fillText("온도 T = "+temperature.toFixed(1)+" K",35,102);
+}
+createParticles();draw();
+</script>
+</body>
+</html>
